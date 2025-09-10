@@ -1,8 +1,11 @@
 const express = require('express');
 const WebSocket = require('ws');
-const axios = require('axios');
 const cors = require('cors');
 const http = require('http');
+const { exec, spawn } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
 
 const app = express();
 const server = http.createServer(app);
@@ -13,8 +16,65 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('.'));
 
-// Python backend URL
-const PYTHON_API_URL = 'http://localhost:8081';
+// Print utilities for macOS
+class PrintHandler {
+    static async getDefaultPrinter() {
+        return new Promise((resolve) => {
+            exec('lpstat -d', (error, stdout) => {
+                if (error) {
+                    resolve(null);
+                    return;
+                }
+                const match = stdout.match(/system default destination: (.+)/);
+                resolve(match ? match[1] : null);
+            });
+        });
+    }
+
+    static async getAvailablePrinters() {
+        return new Promise((resolve) => {
+            exec('lpstat -p', (error, stdout) => {
+                if (error) {
+                    resolve([]);
+                    return;
+                }
+                const printers = [];
+                const lines = stdout.split('\n');
+                for (const line of lines) {
+                    const match = line.match(/printer (.+) is/);
+                    if (match) {
+                        printers.push({
+                            name: match[1],
+                            status: line.includes('idle') ? 'idle' : 'busy'
+                        });
+                    }
+                }
+                resolve(printers);
+            });
+        });
+    }
+
+    static async printText(printerName, content) {
+        return new Promise((resolve) => {
+            const tempFile = path.join(os.tmpdir(), `print_${Date.now()}.txt`);
+            fs.writeFileSync(tempFile, content);
+            
+            const cmd = printerName ? `lpr -P "${printerName}" "${tempFile}"` : `lpr "${tempFile}"`;
+            exec(cmd, (error) => {
+                fs.unlinkSync(tempFile);
+                resolve({
+                    success: !error,
+                    message: error ? error.message : 'Print job sent successfully'
+                });
+            });
+        });
+    }
+
+    static async printTestPage(printerName) {
+        const testContent = `Test Page\n\nPrinter: ${printerName || 'Default'}\nTime: ${new Date().toLocaleString()}\nTest completed successfully.`;
+        return await this.printText(printerName, testContent);
+    }
+}
 
 // Store connected clients
 const clients = new Map();
@@ -84,10 +144,13 @@ wss.on('connection', (ws, req) => {
 // Handle get printers request
 async function handleGetPrinters(ws, clientId) {
     try {
-        const response = await axios.get(`${PYTHON_API_URL}/printers`);
+        const printers = await PrintHandler.getAvailablePrinters();
+        const defaultPrinter = await PrintHandler.getDefaultPrinter();
         
-        // Extract printers array from Python backend response
-        const printers = response.data.printers || [];
+        // Mark default printer
+        printers.forEach(printer => {
+            printer.isDefault = printer.name === defaultPrinter;
+        });
         
         ws.send(JSON.stringify({
             type: 'printers',
@@ -98,7 +161,7 @@ async function handleGetPrinters(ws, clientId) {
         console.error('Error getting printers:', error.message);
         ws.send(JSON.stringify({
             type: 'error',
-            message: 'Failed to get printers from Python backend'
+            message: 'Failed to get printers from system'
         }));
     }
 }
@@ -106,24 +169,18 @@ async function handleGetPrinters(ws, clientId) {
 // Handle print test request
 async function handlePrintTest(ws, clientId, printerName) {
     try {
-        if (!printerName) {
-            ws.send(JSON.stringify({
-                type: 'error',
-                message: 'Printer name is required'
-            }));
-            return;
-        }
-        
-        const response = await axios.get(`${PYTHON_API_URL}/print-test`, {
-            params: { printer: printerName }
-        });
+        const result = await PrintHandler.printTestPage(printerName);
         
         ws.send(JSON.stringify({
             type: 'printResult',
-            data: response.data
+            data: {
+                success: result.success,
+                message: result.message,
+                printer: printerName || 'Default'
+            }
         }));
         
-        console.log(`Print test result sent to ${clientId}:`, response.data);
+        console.log(`Print test result sent to ${clientId}:`, result);
     } catch (error) {
         console.error('Error in print test:', error.message);
         ws.send(JSON.stringify({
@@ -136,14 +193,6 @@ async function handlePrintTest(ws, clientId, printerName) {
 // Handle custom print request
 async function handleCustomPrint(ws, clientId, data) {
     try {
-        if (!data.printer) {
-            ws.send(JSON.stringify({
-                type: 'error',
-                message: 'Printer name is required'
-            }));
-            return;
-        }
-        
         if (!data.content) {
             ws.send(JSON.stringify({
                 type: 'error',
@@ -152,19 +201,18 @@ async function handleCustomPrint(ws, clientId, data) {
             return;
         }
         
-        // Gửi request tới Python backend để in nội dung tùy chỉnh
-        const response = await axios.post(`${PYTHON_API_URL}/print-content`, {
-            printer: data.printer,
-            content: data.content,
-            content_type: 'text'
-        });
+        const result = await PrintHandler.printText(data.printer, data.content);
         
         ws.send(JSON.stringify({
             type: 'printResult',
-            data: response.data
+            data: {
+                success: result.success,
+                message: result.message,
+                printer: data.printer || 'Default'
+            }
         }));
         
-        console.log(`Custom print result sent to ${clientId}:`, response.data);
+        console.log(`Custom print result sent to ${clientId}:`, result);
     } catch (error) {
         console.error('Error in custom print:', error.message);
         ws.send(JSON.stringify({
@@ -180,7 +228,8 @@ app.get('/api/status', (req, res) => {
         status: 'running',
         clients: clients.size,
         uptime: process.uptime(),
-        pythonBackend: PYTHON_API_URL
+        platform: os.platform(),
+        printSystem: 'macOS CUPS'
     });
 });
 
@@ -193,21 +242,27 @@ app.get('/api/clients', (req, res) => {
     res.json(clientList);
 });
 
-// Proxy endpoints to Python backend
+// Direct printer endpoints
 app.get('/api/printers', async (req, res) => {
     try {
-        const response = await axios.get(`${PYTHON_API_URL}/printers`);
-        // Extract printers array from Python backend response
-        const printers = response.data.printers || [];
+        const printers = await PrintHandler.getAvailablePrinters();
+        const defaultPrinter = await PrintHandler.getDefaultPrinter();
+        
+        // Mark default printer
+        printers.forEach(printer => {
+            printer.isDefault = printer.name === defaultPrinter;
+        });
+        
         res.json({
             status: 'success',
             printers: printers,
-            count: printers.length
+            count: printers.length,
+            defaultPrinter: defaultPrinter
         });
     } catch (error) {
         res.status(500).json({ 
             status: 'error',
-            message: 'Failed to get printers from Python backend'
+            message: 'Failed to get printers from system'
         });
     }
 });
@@ -215,16 +270,44 @@ app.get('/api/printers', async (req, res) => {
 app.get('/api/print-test', async (req, res) => {
     try {
         const { printer } = req.query;
-        if (!printer) {
-            return res.status(400).json({ error: 'Printer parameter is required' });
+        const result = await PrintHandler.printTestPage(printer);
+        
+        res.json({
+            success: result.success,
+            message: result.message,
+            printer: printer || 'Default'
+        });
+    } catch (error) {
+        res.status(500).json({ 
+            success: false,
+            error: 'Failed to execute print test'
+        });
+    }
+});
+
+app.post('/api/print', async (req, res) => {
+    try {
+        const { printer, content } = req.body;
+        
+        if (!content) {
+            return res.status(400).json({ 
+                success: false,
+                error: 'Content is required' 
+            });
         }
         
-        const response = await axios.get(`${PYTHON_API_URL}/print-test`, {
-            params: { printer }
+        const result = await PrintHandler.printText(printer, content);
+        
+        res.json({
+            success: result.success,
+            message: result.message,
+            printer: printer || 'Default'
         });
-        res.json(response.data);
     } catch (error) {
-        res.status(500).json({ error: 'Failed to execute print test' });
+        res.status(500).json({ 
+            success: false,
+            error: 'Failed to execute print job'
+        });
     }
 });
 
@@ -234,13 +317,18 @@ function generateClientId() {
 }
 
 // Start server
-const PORT = process.env.PORT || 1111;
+const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-    console.log(`🚀 Node.js Bridge Server running on port ${PORT}`);
+    console.log(`🚀 Node.js Print Server running on port ${PORT}`);
     console.log(`📡 WebSocket server: ws://localhost:${PORT}`);
     console.log(`🌐 HTTP API: http://localhost:${PORT}/api`);
-    console.log(`🔗 Python Backend: ${PYTHON_API_URL}`);
+    console.log(`🖨️  Print System: macOS CUPS (native)`);
     console.log(`📄 Static files: http://localhost:${PORT}`);
+    console.log(`\n📋 Available endpoints:`);
+    console.log(`   GET  /api/printers    - List available printers`);
+    console.log(`   GET  /api/print-test - Print test page`);
+    console.log(`   POST /api/print      - Print custom content`);
+    console.log(`   GET  /api/status     - Server status`);
 });
 
 // Graceful shutdown

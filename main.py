@@ -1,44 +1,44 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Python Print Server - Entry Point
-Tương thích với Windows 7
+WebSocket Print Client - Entry Point
+Kết nối với Node.js WebSocket Server
 """
 
 import sys
 import os
-import threading
-import time
-from http_printer_server import run_server
+import asyncio
+from websocket_print_client import WebSocketPrintClient
 
-def main():
+async def main():
     """
     Entry point chính của ứng dụng
     """
-    print("🖨️  Python Print Server")
-    print("📋 Tương thích Windows 7")
-    print("🚀 Đang khởi động server...")
+    print("🖨️  WebSocket Print Client")
+    print("🔌 Kết nối với Node.js WebSocket Server")
+    print("🚀 Đang khởi động client...")
     
     try:
-        print("✅ Server đang khởi động...")
-        print("🌐 HTTP Server: http://localhost:8081")
-        print("📡 API Endpoints:")
-        print("   - GET /printers - Lấy danh sách máy in")
-        print("   - POST /print-content - Gửi lệnh in")
-        print("   - GET /print-test - Test in")
+        print("✅ Client đang khởi động...")
+        print("🌐 WebSocket Server: ws://localhost:3001")
+        print("📡 Chức năng:")
+        print("   - Lấy danh sách máy in")
+        print("   - In test page")
+        print("   - In nội dung tùy chỉnh")
         print("")
-        print("⚠️  Nhấn Ctrl+C để dừng server")
+        print("⚠️  Nhấn Ctrl+C để dừng client")
         print("="*50)
         
-        # Chạy server
-        run_server(8081)
+        # Chạy WebSocket client
+        client = WebSocketPrintClient()
+        await client.run()
         
     except KeyboardInterrupt:
-        print("\n🛑 Đang dừng server...")
-        print("✅ Server đã dừng thành công!")
+        print("\n🛑 Đang dừng client...")
+        print("✅ Client đã dừng thành công!")
         sys.exit(0)
     except Exception as e:
-        print(f"❌ Lỗi khởi động server: {e}")
+        print(f"❌ Lỗi khởi động client: {e}")
         input("Nhấn Enter để thoát...")
         sys.exit(1)
 
@@ -53,5 +53,5 @@ if __name__ == "__main__":
                 locale.setlocale(locale.LC_ALL, 'en_US.UTF-8')
             except:
                 pass
-    
-    main()
+
+    asyncio.run(main())

@@ -1,10 +1,10 @@
-# WebSocket Print Client for Windows
+# WebSocket Print Client
 
-Ứng dụng Python để kết nối với WebSocket server và in tài liệu từ web sang máy in Windows.
+Ứng dụng Python kết nối với Node.js WebSocket server để xử lý in ấn trên Windows.
 
 ## Tính năng
 
-- Kết nối WebSocket tới server `wss://print-socket.onrender.com`
+- Kết nối WebSocket tới Node.js server `ws://localhost:3001`
 - Hỗ trợ in nhiều loại nội dung:
   - Văn bản thuần túy (text)
   - HTML
@@ -12,12 +12,13 @@
   - Hình ảnh (từ base64 hoặc file)
 - Tự động kết nối lại khi mất kết nối
 - Logging chi tiết
-- Quản lý máy in Windows
+- Quản lý máy in Windows với win32print
 
 ## Yêu cầu hệ thống
 
 - Windows 10/11
 - Python 3.8+
+- Node.js WebSocket server chạy trên port 3001
 - Máy in đã được cài đặt và cấu hình
 
 ## Cài đặt
@@ -32,7 +33,14 @@ pip install -r requirements.txt
 
 ## Sử dụng
 
-### Chạy ứng dụng
+### 1. Khởi động Node.js WebSocket Server
+
+```bash
+cd node-server
+npm start
+```
+
+### 2. Chạy Python WebSocket Client
 
 ```bash
 python main.py
@@ -40,14 +48,36 @@ python main.py
 
 ### Cấu trúc tin nhắn WebSocket
 
-Ứng dụng hỗ trợ các loại tin nhắn sau:
+Client hỗ trợ các loại tin nhắn sau từ Node.js server:
 
-#### 1. Công việc in (print_job)
+#### 1. Lấy danh sách máy in (getPrinters)
 
 ```json
 {
-  "type": "print_job",
-  "job_id": "unique_job_id",
+  "type": "getPrinters"
+}
+```
+
+#### 2. In test page (printTest)
+
+```json
+{
+  "type": "printTest",
+  "printer": "printer_name"
+}
+```
+
+#### 3. In nội dung (print)
+
+```json
+{
+  "type": "print",
+  "content": "Nội dung cần in",
+  "printer": "printer_name",
+  "options": {
+    "content_type": "text"
+  }
+}
   "content": "nội dung cần in",
   "options": {
     "content_type": "text|html|pdf|image",
