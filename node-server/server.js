@@ -234,7 +234,7 @@ function generateClientId() {
 }
 
 // Start server
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 1111;
 server.listen(PORT, () => {
     console.log(`🚀 Node.js Bridge Server running on port ${PORT}`);
     console.log(`📡 WebSocket server: ws://localhost:${PORT}`);
