@@ -1,0 +1,5 @@
+websockets>=11.0.3
+pywin32>=306
+requests>=2.31.0
+json5>=0.9.14
+aiofiles>=23.2.1
